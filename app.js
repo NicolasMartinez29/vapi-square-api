@@ -10,7 +10,10 @@ const {
   SQUARE_TEAM_MEMBER_ID,
   SERVICE_VARIATION_MAP = '{}',
   TIMEZONE = 'America/Chicago',
+  DRY_RUN = 'false',
 } = process.env;
+
+const dryRun = String(DRY_RUN).toLowerCase() === 'true';
 
 function normalizeServiceKey(raw) {
   return String(raw)
@@ -98,6 +101,7 @@ app.get('/health', (_req, res) => {
     ok: true,
     environment: SQUARE_ENVIRONMENT,
     configured: Boolean(client && SQUARE_LOCATION_ID && SQUARE_TEAM_MEMBER_ID),
+    dryRun,
   });
 });
 
@@ -177,6 +181,25 @@ app.post('/book-appointment', async (req, res) => {
       return res.status(502).json({
         success: false,
         error: `Could not fetch service variation ${serviceVariationId} from Square catalog`,
+      });
+    }
+
+    if (dryRun) {
+      console.log(`[${reqId}] DRY_RUN=true — skipping bookings.create, returning simulated success`);
+      return res.status(200).json({
+        success: true,
+        dryRun: true,
+        message: 'Appointment flow validated (DRY_RUN, no booking written to Square)',
+        booking: {
+          id: `dryrun_${reqId}`,
+          status: 'PENDING_SUBSCRIPTION',
+          startAt,
+          customerId,
+          locationId: SQUARE_LOCATION_ID,
+          teamMemberId: SQUARE_TEAM_MEMBER_ID,
+          serviceVariationId,
+          serviceVariationVersion: String(serviceVariationVersion),
+        },
       });
     }
 
