@@ -23,8 +23,8 @@ const bodySchema = z.object({
   name: z.string().min(1),
   phone: z.string().min(7),
   service: z.string().min(1),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD'),
-  time: z.string().regex(/^\d{1,2}:\d{2}$/, 'time must be HH:MM'),
+  date: z.string().min(4),
+  time: z.string().min(1),
   business: z.string().optional(),
 });
 
@@ -74,7 +74,21 @@ export async function POST(req: Request) {
 
   const normalizedPhone = normalizePhone(input.phone);
   const { givenName, familyName } = splitName(input.name);
-  const startAt = toRFC3339(input.date, input.time, business.timezone);
+
+  let startAt: string;
+  try {
+    startAt = toRFC3339(input.date, input.time, business.timezone);
+  } catch (e) {
+    return NextResponse.json(
+      {
+        success: false,
+        reason: 'invalid_datetime',
+        error: e instanceof Error ? e.message : String(e),
+        hint: 'Send date as YYYY-MM-DD or MM/DD/YYYY, time as 24h HH:MM or 12h with am/pm',
+      },
+      { status: 400 }
+    );
+  }
 
   const client = squareClient(business);
   let squareCustomerId: string | undefined;

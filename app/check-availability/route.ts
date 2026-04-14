@@ -7,6 +7,7 @@ import {
   buildServiceMap,
   dayBoundsUtc,
   formatSlotInTz,
+  normalizeDate,
   normalizeServiceKey,
 } from '@/lib/services';
 
@@ -15,7 +16,7 @@ export const dynamic = 'force-dynamic';
 
 const bodySchema = z.object({
   service: z.string().min(1),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD'),
+  date: z.string().min(4),
   business: z.string().optional(),
 });
 
@@ -54,7 +55,16 @@ export async function POST(req: Request) {
     );
   }
 
-  const { startUtcIso, endUtcIso } = dayBoundsUtc(input.date, business.timezone);
+  let isoDate: string;
+  try {
+    isoDate = normalizeDate(input.date);
+  } catch (e) {
+    return NextResponse.json(
+      { success: false, error: e instanceof Error ? e.message : String(e) },
+      { status: 400 }
+    );
+  }
+  const { startUtcIso, endUtcIso } = dayBoundsUtc(isoDate, business.timezone);
   try {
     const slotsUtc = await searchAvailableSlots(business, serviceVariationId, startUtcIso, endUtcIso);
     const slots = slotsUtc.map((iso) => ({
@@ -63,7 +73,7 @@ export async function POST(req: Request) {
     }));
     return NextResponse.json({
       success: true,
-      date: input.date,
+      date: isoDate,
       service: input.service,
       timezone: business.timezone,
       slotCount: slots.length,
