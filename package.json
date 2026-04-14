@@ -1,15 +1,37 @@
 {
   "name": "vapi-square-api",
-  "version": "1.0.0",
-  "description": "Backend API connecting Vapi AI receptionist to Square Appointments",
-  "main": "server.js",
+  "version": "2.0.0",
+  "description": "Vapi voice receptionist + Square Appointments + dashboard for resale",
+  "private": true,
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "seed": "tsx scripts/seed.ts"
   },
   "dependencies": {
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2",
-    "square": "^44.0.1"
+    "@neondatabase/serverless": "^0.10.4",
+    "drizzle-orm": "^0.36.4",
+    "next": "^16.2.3",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "square": "^44.0.1",
+    "twilio": "^5.4.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "autoprefixer": "^10.4.20",
+    "dotenv": "^17.4.2",
+    "drizzle-kit": "^0.30.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.2"
   }
 }
