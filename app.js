@@ -155,6 +155,18 @@ app.post('/book-appointment', async (req, res) => {
       return res.status(502).json({ success: false, error: 'Failed to resolve customer id' });
     }
 
+    // Fetch the current version of the service variation (required by Square).
+    let serviceVariationVersion;
+    try {
+      const catResp = await client.catalog.object.get({ objectId: serviceVariationId });
+      serviceVariationVersion = catResp.object?.version;
+    } catch (_e) {
+      return res.status(502).json({
+        success: false,
+        error: `Could not fetch service variation ${serviceVariationId} from Square catalog`,
+      });
+    }
+
     const bookingResp = await client.bookings.create({
       idempotencyKey: randomUUID(),
       booking: {
@@ -165,7 +177,7 @@ app.post('/book-appointment', async (req, res) => {
           {
             teamMemberId: SQUARE_TEAM_MEMBER_ID,
             serviceVariationId,
-            serviceVariationVersion: 1n,
+            serviceVariationVersion,
           },
         ],
       },
