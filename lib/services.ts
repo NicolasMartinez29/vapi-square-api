@@ -36,6 +36,22 @@ export function toRFC3339(dateStr: string, timeStr: string, timeZone: string): s
   return new Date(utcGuess - offsetMs).toISOString();
 }
 
+export function dayBoundsUtc(dateStr: string, timeZone: string): { startUtcIso: string; endUtcIso: string } {
+  const startUtcIso = toRFC3339(dateStr, '00:00', timeZone);
+  const endUtcIso = toRFC3339(dateStr, '23:59', timeZone);
+  return { startUtcIso, endUtcIso };
+}
+
+export function formatSlotInTz(utcIso: string, timeZone: string): string {
+  const d = new Date(utcIso);
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(d);
+}
+
 function tzOffsetMs(date: Date, timeZone: string): number {
   const dtf = new Intl.DateTimeFormat('en-US', {
     timeZone,

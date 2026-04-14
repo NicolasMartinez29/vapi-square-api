@@ -4,9 +4,11 @@ import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { businesses, appointments } from '@/lib/schema';
-import { squareClient, safeJson } from '@/lib/square';
+import { squareClient, safeJson, searchAvailableSlots } from '@/lib/square';
 import {
   buildServiceMap,
+  dayBoundsUtc,
+  formatSlotInTz,
   normalizePhone,
   normalizeServiceKey,
   splitName,
@@ -103,6 +105,39 @@ export async function POST(req: Request) {
   }
 
   const dryRun = String(business.dryRun).toLowerCase() === 'true';
+
+  if (!dryRun) {
+    try {
+      const { startUtcIso, endUtcIso } = dayBoundsUtc(input.date, business.timezone);
+      const slotsUtc = await searchAvailableSlots(business, serviceVariationId, startUtcIso, endUtcIso);
+      const requestedUtcMs = new Date(startAt).getTime();
+      const matchTolerance = 60 * 1000;
+      const isAvailable = slotsUtc.some(
+        (s) => Math.abs(new Date(s).getTime() - requestedUtcMs) <= matchTolerance
+      );
+      if (!isAvailable) {
+        const alternatives = slotsUtc
+          .slice(0, 6)
+          .map((iso) => formatSlotInTz(iso, business.timezone));
+        console.warn(`[${reqId}] requested slot ${startAt} not available. alternatives:`, alternatives);
+        return NextResponse.json(
+          {
+            success: false,
+            reason: 'slot_unavailable',
+            message: alternatives.length
+              ? `That time isn't available. Available times that day: ${alternatives.join(', ')}.`
+              : `No availability on ${input.date}. Try another day.`,
+            requested: { date: input.date, time: input.time },
+            alternatives,
+          },
+          { status: 409 }
+        );
+      }
+    } catch (err) {
+      console.error(`[${reqId}] availability lookup failed:`, err);
+    }
+  }
+
   if (!dryRun && squareCustomerId) {
     try {
       const catResp = await client.catalog.object.get({ objectId: serviceVariationId });
