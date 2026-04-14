@@ -1,112 +1,97 @@
-# Vapi ↔ Square Appointments API
+# Vapi → Square Booking Platform
 
-Node.js/Express backend that receives booking data from a Vapi AI receptionist and creates the appointment in Square.
+Voice receptionist (Vapi) → API → Square Appointments + dashboard.
+Built multi-tenant from day one so the same deployment can serve many businesses.
 
-## Setup
+**Production:** https://vapi-square-api.vercel.app
+**Dashboard:** https://vapi-square-api.vercel.app/login
 
-1. **Install dependencies**
-   ```bash
-   cd C:\Users\nicos\vapi-square-api
-   npm install
-   ```
+## Architecture
 
-2. **Configure environment**
-   ```bash
-   cp .env.example .env
-   ```
-   Then edit `.env` and fill in:
-   - `SQUARE_ACCESS_TOKEN` — from https://developer.squareup.com/apps (use **Sandbox** token first to test)
-   - `SQUARE_ENVIRONMENT` — `sandbox` or `production`
-   - `SQUARE_LOCATION_ID` — your Square location (Dashboard → Account & Settings → Locations)
-   - `SQUARE_TEAM_MEMBER_ID` — the staff member (barber) who takes the booking. Get it via `GET /v2/team-members/search` or the Square Dashboard.
-   - `SERVICE_VARIATION_MAP` — JSON mapping human service names → Square service variation IDs. You can find these under **Appointments → Services** in the Dashboard, or via `GET /v2/catalog/list?types=ITEM`. Example:
-     ```json
-     {"haircut":"ABC123","beard trim":"DEF456","haircut and beard":"GHI789"}
-     ```
-   - `TIMEZONE` — e.g. `America/Chicago` (Sioux Falls is Central)
+```
+Vapi call → POST /book-appointment
+              ├─ resolve business by slug (or default to first)
+              ├─ create/find Square customer (works on Free plan)
+              ├─ if !dryRun: create Square booking (needs Appointments Plus)
+              ├─ insert appointment row in Postgres (always)
+              └─ fire-and-forget Twilio SMS to business.notifyPhone
 
-3. **Run the server**
-   ```bash
-   npm start        # production
-   npm run dev      # auto-reload on file changes
-   ```
-   Server starts on `http://localhost:3000`.
-
-## Endpoint
-
-### `POST /book-appointment`
-
-**Request body (JSON):**
-```json
-{
-  "name": "John Smith",
-  "phone": "+16055551234",
-  "service": "haircut",
-  "date": "2026-04-20",
-  "time": "14:30"
-}
+Owner browser → /login → /                (cookie session, scrypt password)
+                          ├─ list upcoming + history
+                          └─ confirm / complete / cancel buttons
 ```
 
-Field notes:
-- `phone` — accepts `+16055551234`, `6055551234`, `(605) 555-1234`; normalized to E.164.
-- `service` — case-insensitive; must match a key in `SERVICE_VARIATION_MAP`.
-- `date` — `YYYY-MM-DD`.
-- `time` — 24-hour `HH:MM` in the configured `TIMEZONE`.
+Stack: Next.js 15 (App Router), Neon Postgres, Drizzle ORM, Square SDK v44,
+Twilio SMS, Tailwind, scrypt + sha256 sessions.
 
-**Success (200):**
-```json
-{
-  "success": true,
-  "message": "Appointment booked successfully",
-  "booking": {
-    "id": "zkn3...",
-    "status": "ACCEPTED",
-    "startAt": "2026-04-20T19:30:00Z",
-    "customerId": "CUST_...",
-    "locationId": "LOC_..."
-  }
-}
-```
+## Endpoints
 
-**Failure (400 / 502):**
-```json
-{
-  "success": false,
-  "error": "Square API request failed",
-  "details": [{ "code": "...", "detail": "..." }]
-}
-```
+| Method | Path                  | Notes                                       |
+|--------|-----------------------|---------------------------------------------|
+| POST   | `/book-appointment`   | Vapi target. Body: name, phone, service, date (YYYY-MM-DD), time (HH:MM), [business] |
+| GET    | `/health`             | DB + Twilio status                          |
+| GET    | `/`                   | Dashboard (auth required)                   |
+| GET    | `/login`              | Owner login                                 |
 
-### `GET /health`
-Returns `{ "ok": true }`.
+## Database schema
 
-## Testing locally
+- `businesses` — one row per client. Holds Square credentials, location id, team
+  member id, service map (JSON), timezone, owner password hash, notification phone,
+  dry-run flag.
+- `appointments` — every booking ever attempted. FK to business. Stores Square
+  customer id, Square booking id (if successful), Square error (if failed),
+  status (pending / pending_dry_run / confirmed / completed / cancelled / no_show),
+  raw Vapi payload.
+- `sessions` — cookie sessions (sha256-hashed token, 14-day expiry).
+
+## Onboarding a new client (resale playbook)
+
+1. **Get from the client:**
+   - Square Access Token (production), Location ID, Team Member ID
+   - List of services and their Square Service Variation IDs
+   - Owner phone for SMS notifications
+   - Owner timezone (defaults to America/Chicago)
+
+2. **Insert their row** by running the seed script with their values:
+   ```bash
+   DATABASE_URL=... \
+   SQUARE_ACCESS_TOKEN=... \
+   SQUARE_LOCATION_ID=... \
+   SQUARE_TEAM_MEMBER_ID=... \
+   SEED_PASSWORD=... \
+   SEED_NOTIFY_PHONE=+15555550199 \
+   SEED_DRY_RUN=true \
+   SEED_NAME="Client Name" \
+   SEED_SLUG="client-slug" \
+   npm run seed
+   ```
+   (Edit `scripts/seed.ts` to swap in their actual SERVICE_MAP.)
+
+3. **Wire Vapi:** point the booking tool to
+   `POST https://vapi-square-api.vercel.app/book-appointment`
+   with body `{name, phone, service, date, time, business: "<their-slug>"}`.
+
+4. **When client is on Square Appointments Plus**, flip `dryRun=false` for that
+   business via SQL: `UPDATE businesses SET dry_run = 'false' WHERE slug = '...';`
+
+## Required env vars (Vercel)
+
+- `DATABASE_URL` — set automatically by Neon integration.
+- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` — for SMS.
+  Without these, bookings still save and the dashboard works; only SMS is skipped.
+
+## Local dev
 
 ```bash
-curl -X POST http://localhost:3000/book-appointment \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "John Smith",
-    "phone": "605-555-1234",
-    "service": "haircut",
-    "date": "2026-04-20",
-    "time": "14:30"
-  }'
+npm install
+vercel env pull .env.local --environment=development
+npm run dev
+# http://localhost:3000
 ```
 
-## Hooking up Vapi
+## Migrations
 
-In your Vapi assistant, add a **Tool / Function Call** that POSTs to `https://<your-public-url>/book-appointment` with the JSON body above. To expose localhost publicly during testing, use `ngrok http 3000` and point Vapi at the ngrok URL.
-
-## What it does
-
-1. Normalizes the phone number to E.164.
-2. Searches Square customers by phone; reuses the record if found, otherwise creates one.
-3. Creates a booking with the mapped service variation, team member, and start time (converted from your local timezone to RFC3339 UTC).
-4. Returns a clean success/failure response.
-
-## Notes / caveats
-
-- `serviceVariationVersion` is set to `1n`. If you've edited a service in Square, fetch the current version with `GET /v2/catalog/object/{id}` and update the code, or extend the handler to look it up dynamically.
-- Square booking APIs require that **Square Appointments** be enabled on the seller account and that the team member has booking availability configured.
-- Start with `SQUARE_ENVIRONMENT=sandbox` and a sandbox access token until the flow works end-to-end.
+```bash
+npm run db:generate   # after schema changes
+npm run db:migrate    # apply
+```
