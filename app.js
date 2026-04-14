@@ -12,9 +12,22 @@ const {
   TIMEZONE = 'America/Chicago',
 } = process.env;
 
+function normalizeServiceKey(raw) {
+  return String(raw)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 let serviceMap = {};
 try {
-  serviceMap = JSON.parse(SERVICE_VARIATION_MAP);
+  const rawMap = JSON.parse(SERVICE_VARIATION_MAP);
+  for (const [k, v] of Object.entries(rawMap)) {
+    serviceMap[normalizeServiceKey(k)] = v;
+  }
 } catch (_err) {
   console.error('SERVICE_VARIATION_MAP must be valid JSON');
 }
@@ -108,7 +121,7 @@ app.post('/book-appointment', async (req, res) => {
     });
   }
 
-  const serviceKey = String(service).toLowerCase().trim();
+  const serviceKey = normalizeServiceKey(service);
   const serviceVariationId = serviceMap[serviceKey];
   if (!serviceVariationId) {
     console.warn(`[${reqId}] unknown service "${service}"`);
